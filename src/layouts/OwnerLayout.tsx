@@ -4,7 +4,7 @@ import { LayoutDashboard, LogOut, Bell, Settings, PieChart, Utensils, Users, Mes
 import { cn } from '../lib/utils';
 
 export function OwnerLayout() {
-  const { logout, user } = useAuth();
+  const { logout, profile } = useAuth();
   const location = useLocation();
 
   const navItems = [
@@ -22,9 +22,9 @@ export function OwnerLayout() {
       <aside className="w-64 bg-slate-900 text-white flex flex-col">
         <div className="p-6">
           <h2 className="text-2xl font-bold text-white tracking-tight">Owner Portal</h2>
-          <p className="text-slate-400 text-sm mt-1">{user?.name}</p>
+          <p className="text-slate-400 text-sm mt-1">{profile?.full_name ?? 'Owner'}</p>
         </div>
-        
+
         <nav className="flex-1 px-4 space-y-1 mt-4">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -35,9 +35,7 @@ export function OwnerLayout() {
                 to={item.path}
                 className={cn(
                   "flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors",
-                  isActive 
-                    ? "bg-indigo-600 text-white" 
-                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  isActive ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
                 )}
               >
                 <Icon className="mr-3 h-5 w-5" />
@@ -63,7 +61,6 @@ export function OwnerLayout() {
           <div className="flex items-center space-x-4">
             <select className="bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5">
               <option>Downtown Location</option>
-              <option>Uptown Location</option>
             </select>
           </div>
           <div className="flex items-center space-x-4">
