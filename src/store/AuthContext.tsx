@@ -1,82 +1,133 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
-import { Database } from '../lib/database.types';
+import {
+  createProfile,
+  getProfile,
+  getUserByToken,
+  signInWithEmail,
+  signUpWithEmail,
+  type FirebaseAuthSession,
+  type FirebaseProfile,
+} from '../lib/firebase';
 
-type Profile = Database['public']['Tables']['profiles']['Row'];
+interface AuthUser {
+  uid: string;
+  email: string;
+}
 
 interface AuthState {
-  user: User | null;
-  profile: Profile | null;
-  session: Session | null;
+  user: AuthUser | null;
+  profile: FirebaseProfile | null;
+  session: FirebaseAuthSession | null;
   loading: boolean;
+  authError: string | null;
   login: (email: string, password: string) => Promise<{ error: string | null }>;
   logout: () => Promise<void>;
   signUp: (email: string, password: string, fullName: string, role: 'owner' | 'manager') => Promise<{ error: string | null }>;
 }
 
+const SESSION_STORAGE_KEY = 'orbitdine.firebase.session';
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+const persistSession = (session: FirebaseAuthSession | null) => {
+  if (!session) {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+};
 
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    if (!error && data) setProfile(data);
+const readSession = (): FirebaseAuthSession | null => {
+  const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as FirebaseAuthSession;
+  } catch {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    return null;
+  }
+};
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [profile, setProfile] = useState<FirebaseProfile | null>(null);
+  const [session, setSession] = useState<FirebaseAuthSession | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const resetAuth = () => {
+    setUser(null);
+    setProfile(null);
+    setSession(null);
+    setAuthError(null);
+    persistSession(null);
+  };
+
+  const hydrateProfile = async (activeSession: FirebaseAuthSession) => {
+    const account = await getUserByToken(activeSession.idToken);
+    setUser(account);
+
+    const userProfile = await getProfile(account.uid, activeSession.idToken);
+    if (!userProfile) {
+      setProfile(null);
+      setAuthError('Your account is pending setup. Please ask an owner to complete onboarding.');
+      return;
+    }
+
+    setProfile(userProfile);
+    setAuthError(null);
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id);
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
-        setProfile(null);
+    const hydrate = async () => {
+      const savedSession = readSession();
+      if (!savedSession) {
+        setLoading(false);
+        return;
       }
-    });
 
-    return () => subscription.unsubscribe();
+      try {
+        setSession(savedSession);
+        await hydrateProfile(savedSession);
+      } catch {
+        resetAuth();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    hydrate();
   }, []);
 
   const login = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
-    return { error: null };
+    try {
+      const nextSession = await signInWithEmail(email, password);
+      setSession(nextSession);
+      persistSession(nextSession);
+      await hydrateProfile(nextSession);
+      return { error: null };
+    } catch (err) {
+      resetAuth();
+      return { error: err instanceof Error ? err.message : 'Login failed.' };
+    }
   };
 
   const signUp = async (email: string, password: string, fullName: string, role: 'owner' | 'manager') => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: fullName, role },
-      },
-    });
-    if (error) return { error: error.message };
-    return { error: null };
+    try {
+      const nextSession = await signUpWithEmail(email, password);
+      await createProfile(nextSession.localId, nextSession.idToken, { email, fullName, role });
+      await logout();
+      return { error: null };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Account creation failed.' };
+    }
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    resetAuth();
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, session, loading, login, logout, signUp }}>
+    <AuthContext.Provider value={{ user, profile, session, loading, authError, login, logout, signUp }}>
       {children}
     </AuthContext.Provider>
   );
