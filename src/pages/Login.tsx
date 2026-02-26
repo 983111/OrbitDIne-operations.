@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../store/AuthContext';
-import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, ShieldCheck, User, AlertCircle, Loader2 } from 'lucide-react';
 
 type Mode = 'login' | 'signup';
 
 export function Login() {
-  const { login, signUp } = useAuth();
-  const navigate = useNavigate();
+  const { login, signUp, authError } = useAuth();
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,8 +25,10 @@ export function Login() {
       if (error) {
         setError(error);
         setLoading(false);
+        return;
       }
-      // Navigation happens via auth state change → App.tsx redirect
+
+      // Keep spinner until auth state redirects user to protected route.
     } else {
       if (password.length < 6) {
         setError('Password must be at least 6 characters.');
@@ -92,10 +92,10 @@ export function Login() {
                 </p>
               </div>
 
-              {error && (
+              {(error || authError) && (
                 <div className="mb-4 flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
                   <AlertCircle className="w-4 h-4 shrink-0" />
-                  {error}
+                  {error || authError}
                 </div>
               )}
 

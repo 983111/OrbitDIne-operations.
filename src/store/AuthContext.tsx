@@ -10,6 +10,7 @@ interface AuthState {
   profile: Profile | null;
   session: Session | null;
   loading: boolean;
+  authError: string | null;
   login: (email: string, password: string) => Promise<{ error: string | null }>;
   logout: () => Promise<void>;
   signUp: (email: string, password: string, fullName: string, role: 'owner' | 'manager') => Promise<{ error: string | null }>;
@@ -22,32 +23,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
-    if (!error && data) setProfile(data);
+      .maybeSingle();
+
+    if (error) {
+      setProfile(null);
+      setAuthError('Your account exists but profile loading failed. Please contact support.');
+      return null;
+    }
+
+    if (!data) {
+      setProfile(null);
+      setAuthError('Your account is pending setup. Please ask an owner to complete onboarding.');
+      return null;
+    }
+
+    setProfile(data);
+    setAuthError(null);
+    return data;
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const hydrateSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id);
-      setLoading(false);
-    });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        await fetchProfile(session.user.id);
       } else {
         setProfile(null);
       }
+
+      setLoading(false);
+    };
+
+    hydrateSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+
+      if (nextSession?.user) {
+        await fetchProfile(nextSession.user.id);
+      } else {
+        setProfile(null);
+        setAuthError(null);
+      }
+
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -76,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, session, loading, login, logout, signUp }}>
+    <AuthContext.Provider value={{ user, profile, session, loading, authError, login, logout, signUp }}>
       {children}
     </AuthContext.Provider>
   );
