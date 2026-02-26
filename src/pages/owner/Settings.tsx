@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { AlertTriangle, Palette, Save, Check } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { AlertTriangle, Palette, Save, Check, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../store/AuthContext';
 
 const THEMES = [
   { id: 'modern', name: 'Modern Minimal', color: 'bg-slate-900', text: 'text-white' },
@@ -12,8 +14,44 @@ const THEMES = [
 ];
 
 export function Settings() {
+  const { profile } = useAuth();
   const [activeTheme, setActiveTheme] = useState('modern');
-  const [isShutdown, setIsShutdown] = useState(false);
+  const [isOperational, setIsOperational] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [savingTheme, setSavingTheme] = useState(false);
+  const [savingOps, setSavingOps] = useState(false);
+
+  const restaurantId = profile?.restaurant_id;
+
+  useEffect(() => {
+    if (!restaurantId) return;
+    supabase.from('restaurants').select('theme, is_operational').eq('id', restaurantId).single()
+      .then(({ data }) => {
+        if (data) {
+          setActiveTheme(data.theme ?? 'modern');
+          setIsOperational(data.is_operational);
+        }
+        setLoading(false);
+      });
+  }, [restaurantId]);
+
+  const saveTheme = async () => {
+    if (!restaurantId) return;
+    setSavingTheme(true);
+    await supabase.from('restaurants').update({ theme: activeTheme }).eq('id', restaurantId);
+    setSavingTheme(false);
+  };
+
+  const toggleOperations = async () => {
+    if (!restaurantId) return;
+    setSavingOps(true);
+    const newVal = !isOperational;
+    await supabase.from('restaurants').update({ is_operational: newVal }).eq('id', restaurantId);
+    setIsOperational(newVal);
+    setSavingOps(false);
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-40"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>;
 
   return (
     <div className="space-y-8 max-w-4xl">
@@ -30,17 +68,12 @@ export function Settings() {
           </div>
           <p className="text-slate-500 text-sm">Select the visual style for your digital menu and ordering experience.</p>
         </div>
-        
+
         <div className="p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-          {THEMES.map((theme) => (
-            <button
-              key={theme.id}
-              onClick={() => setActiveTheme(theme.id)}
-              className={cn(
-                "relative rounded-xl border-2 transition-all overflow-hidden text-left group hover:shadow-md",
-                activeTheme === theme.id ? "border-indigo-600 ring-4 ring-indigo-500 ring-opacity-20" : "border-slate-200 hover:border-indigo-300"
-              )}
-            >
+          {THEMES.map(theme => (
+            <button key={theme.id} onClick={() => setActiveTheme(theme.id)}
+              className={cn("relative rounded-xl border-2 transition-all overflow-hidden text-left group hover:shadow-md",
+                activeTheme === theme.id ? "border-indigo-600 ring-4 ring-indigo-500 ring-opacity-20" : "border-slate-200 hover:border-indigo-300")}>
               <div className={cn("h-24 w-full flex items-center justify-center", theme.color)}>
                 <span className={cn("font-bold text-lg", theme.text)}>Menu</span>
               </div>
@@ -54,8 +87,9 @@ export function Settings() {
           ))}
         </div>
         <div className="p-6 border-t border-slate-200 bg-slate-50 flex justify-end">
-          <button className="flex items-center px-4 py-2 bg-indigo-600 border border-transparent rounded-lg text-sm font-medium text-white hover:bg-indigo-700 transition-colors">
-            <Save className="w-4 h-4 mr-2" />
+          <button onClick={saveTheme} disabled={savingTheme}
+            className="flex items-center px-4 py-2 bg-indigo-600 border border-transparent rounded-lg text-sm font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-60">
+            {savingTheme ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
             Save Theme
           </button>
         </div>
@@ -69,23 +103,19 @@ export function Settings() {
           </div>
           <p className="text-red-700 text-sm">Instantly pause all new orders. Existing orders will remain active.</p>
         </div>
-        
+
         <div className="p-6 flex items-center justify-between">
           <div>
             <h3 className="font-bold text-slate-900">Current Status</h3>
             <p className="text-slate-500 text-sm mt-1">
-              {isShutdown ? 'Operations are currently paused. Customers cannot place new orders.' : 'Operations are running normally.'}
+              {isOperational ? 'Operations are running normally.' : 'Operations are currently paused. Customers cannot place new orders.'}
             </p>
           </div>
-          
-          <button
-            onClick={() => setIsShutdown(!isShutdown)}
-            className={cn(
-              "flex items-center px-6 py-3 border border-transparent rounded-xl text-sm font-bold text-white transition-colors shadow-sm",
-              isShutdown ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"
-            )}
-          >
-            {isShutdown ? 'Resume Operations' : 'Pause All Operations'}
+          <button onClick={toggleOperations} disabled={savingOps}
+            className={cn("flex items-center px-6 py-3 border border-transparent rounded-xl text-sm font-bold text-white transition-colors shadow-sm disabled:opacity-60",
+              isOperational ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700")}>
+            {savingOps ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            {isOperational ? 'Pause All Operations' : 'Resume Operations'}
           </button>
         </div>
       </div>

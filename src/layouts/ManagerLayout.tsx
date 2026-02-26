@@ -4,7 +4,7 @@ import { LayoutDashboard, LogOut, Bell, UtensilsCrossed } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function ManagerLayout() {
-  const { logout, user } = useAuth();
+  const { logout, profile } = useAuth();
   const location = useLocation();
 
   const navItems = [
@@ -29,9 +29,7 @@ export function ManagerLayout() {
                   to={item.path}
                   className={cn(
                     "flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors",
-                    isActive 
-                      ? "bg-indigo-600 text-white" 
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    isActive ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
                   )}
                 >
                   <Icon className="mr-2 h-4 w-4" />
@@ -41,26 +39,20 @@ export function ManagerLayout() {
             })}
           </nav>
         </div>
-        
+
         <div className="flex items-center space-x-6">
-          <div className="flex items-center space-x-4">
-            <button className="p-2 text-slate-300 hover:text-white relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full"></span>
-            </button>
-            <div className="h-8 w-px bg-slate-700"></div>
-            <div className="text-sm">
-              <p className="font-medium">{user?.name}</p>
-              <p className="text-slate-400 text-xs">Downtown Location</p>
-            </div>
-            <button
-              onClick={logout}
-              className="p-2 text-slate-300 hover:text-white transition-colors"
-              title="Sign Out"
-            >
-              <LogOut className="h-5 w-5" />
-            </button>
+          <button className="p-2 text-slate-300 hover:text-white relative">
+            <Bell className="h-5 w-5" />
+            <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full"></span>
+          </button>
+          <div className="h-8 w-px bg-slate-700"></div>
+          <div className="text-sm">
+            <p className="font-medium">{profile?.full_name ?? 'Manager'}</p>
+            <p className="text-slate-400 text-xs">{profile?.email ?? ''}</p>
           </div>
+          <button onClick={logout} className="p-2 text-slate-300 hover:text-white transition-colors" title="Sign Out">
+            <LogOut className="h-5 w-5" />
+          </button>
         </div>
       </header>
 

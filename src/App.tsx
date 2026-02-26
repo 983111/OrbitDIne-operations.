@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './store/AuthContext';
@@ -17,28 +12,43 @@ import { TableConfig } from './pages/owner/TableConfig';
 import { ManagerPermissions } from './pages/owner/ManagerPermissions';
 import { Settings } from './pages/owner/Settings';
 import { Feedback } from './pages/owner/Feedback';
+import { Loader2 } from 'lucide-react';
 
-function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode, allowedRole: 'manager' | 'owner' }) {
-  const { user } = useAuth();
-  
-  if (!user) {
-    return <Navigate to="/login" replace />;
+function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole: 'manager' | 'owner' }) {
+  const { user, profile, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+      </div>
+    );
   }
-  
-  if (user.role !== allowedRole) {
-    return <Navigate to={`/${user.role}`} replace />;
-  }
-  
+
+  if (!user || !profile) return <Navigate to="/login" replace />;
+  if (profile.role !== allowedRole) return <Navigate to={`/${profile.role}`} replace />;
+
   return <>{children}</>;
 }
 
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, profile, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+      </div>
+    );
+  }
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login />} />
-      
+      <Route
+        path="/login"
+        element={user && profile ? <Navigate to={`/${profile.role}`} replace /> : <Login />}
+      />
+
       {/* Manager Routes */}
       <Route path="/manager" element={<ProtectedRoute allowedRole="manager"><ManagerLayout /></ProtectedRoute>}>
         <Route index element={<ManagerDashboard />} />
@@ -70,4 +80,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-
