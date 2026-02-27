@@ -14,19 +14,52 @@ import { Settings } from './pages/owner/Settings';
 import { Feedback } from './pages/owner/Feedback';
 import { Loader2 } from 'lucide-react';
 
-function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole: 'manager' | 'owner' }) {
-  const { user, profile, loading } = useAuth();
+function FullPageSpinner() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+    </div>
+  );
+}
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-      </div>
-    );
+function ProtectedRoute({
+  children,
+  allowedRole,
+}: {
+  children: React.ReactNode;
+  allowedRole: 'manager' | 'owner';
+}) {
+  const { user, profile, loading, authError } = useAuth();
+
+  if (loading) return <FullPageSpinner />;
+
+  // Not logged in at all
+  if (!user) return <Navigate to="/login" replace />;
+
+  // Logged in but profile not loaded yet (DB trigger delay)
+  if (!profile) {
+    if (authError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <div className="text-center max-w-md px-6">
+            <p className="text-slate-700 font-medium mb-4">{authError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return <FullPageSpinner />;
   }
 
-  if (!user || !profile) return <Navigate to="/login" replace />;
-  if (profile.role !== allowedRole) return <Navigate to={`/${profile.role}`} replace />;
+  // Wrong role — redirect to correct portal
+  if (profile.role !== allowedRole) {
+    return <Navigate to={`/${profile.role}`} replace />;
+  }
 
   return <>{children}</>;
 }
@@ -34,28 +67,42 @@ function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; 
 function AppRoutes() {
   const { user, profile, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-      </div>
-    );
-  }
+  if (loading) return <FullPageSpinner />;
 
   return (
     <Routes>
       <Route
         path="/login"
-        element={user && profile ? <Navigate to={`/${profile.role}`} replace /> : <Login />}
+        element={
+          user && profile ? (
+            <Navigate to={`/${profile.role}`} replace />
+          ) : (
+            <Login />
+          )
+        }
       />
 
       {/* Manager Routes */}
-      <Route path="/manager" element={<ProtectedRoute allowedRole="manager"><ManagerLayout /></ProtectedRoute>}>
+      <Route
+        path="/manager"
+        element={
+          <ProtectedRoute allowedRole="manager">
+            <ManagerLayout />
+          </ProtectedRoute>
+        }
+      >
         <Route index element={<ManagerDashboard />} />
       </Route>
 
       {/* Owner Routes */}
-      <Route path="/owner" element={<ProtectedRoute allowedRole="owner"><OwnerLayout /></ProtectedRoute>}>
+      <Route
+        path="/owner"
+        element={
+          <ProtectedRoute allowedRole="owner">
+            <OwnerLayout />
+          </ProtectedRoute>
+        }
+      >
         <Route index element={<OwnerDashboard />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="menu" element={<MenuManagement />} />
