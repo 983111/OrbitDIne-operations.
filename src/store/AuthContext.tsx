@@ -1,133 +1,150 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import {
-  createProfile,
-  getProfile,
-  getUserByToken,
-  signInWithEmail,
-  signUpWithEmail,
-  type FirebaseAuthSession,
-  type FirebaseProfile,
-} from '../lib/firebase';
+import { User, Session } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
+import { Database } from '../lib/database.types';
 
-interface AuthUser {
-  uid: string;
-  email: string;
-}
+type Profile = Database['public']['Tables']['profiles']['Row'];
 
 interface AuthState {
-  user: AuthUser | null;
-  profile: FirebaseProfile | null;
-  session: FirebaseAuthSession | null;
+  user: User | null;
+  profile: Profile | null;
+  session: Session | null;
   loading: boolean;
   authError: string | null;
   login: (email: string, password: string) => Promise<{ error: string | null }>;
   logout: () => Promise<void>;
-  signUp: (email: string, password: string, fullName: string, role: 'owner' | 'manager') => Promise<{ error: string | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    fullName: string,
+    role: 'owner' | 'manager'
+  ) => Promise<{ error: string | null }>;
 }
 
-const SESSION_STORAGE_KEY = 'orbitdine.firebase.session';
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
-const persistSession = (session: FirebaseAuthSession | null) => {
-  if (!session) {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-    return;
-  }
-  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-};
+async function fetchProfile(userId: string): Promise<Profile | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
 
-const readSession = (): FirebaseAuthSession | null => {
-  const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as FirebaseAuthSession;
-  } catch {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-    return null;
-  }
-};
+  if (error || !data) return null;
+  return data;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [profile, setProfile] = useState<FirebaseProfile | null>(null);
-  const [session, setSession] = useState<FirebaseAuthSession | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const resetAuth = () => {
-    setUser(null);
-    setProfile(null);
-    setSession(null);
-    setAuthError(null);
-    persistSession(null);
-  };
-
-  const hydrateProfile = async (activeSession: FirebaseAuthSession) => {
-    const account = await getUserByToken(activeSession.idToken);
-    setUser(account);
-
-    const userProfile = await getProfile(account.uid, activeSession.idToken);
-    if (!userProfile) {
-      setProfile(null);
-      setAuthError('Your account is pending setup. Please ask an owner to complete onboarding.');
-      return;
-    }
-
-    setProfile(userProfile);
-    setAuthError(null);
-  };
-
+  // On mount: restore session from storage and fetch profile
   useEffect(() => {
-    const hydrate = async () => {
-      const savedSession = readSession();
-      if (!savedSession) {
-        setLoading(false);
-        return;
+    let mounted = true;
+
+    const init = async () => {
+      const {
+        data: { session: existingSession },
+      } = await supabase.auth.getSession();
+
+      if (!mounted) return;
+
+      if (existingSession?.user) {
+        setSession(existingSession);
+        setUser(existingSession.user);
+        const p = await fetchProfile(existingSession.user.id);
+        if (mounted) {
+          setProfile(p);
+          if (!p) {
+            setAuthError(
+              'Profile not found. Your account may still be setting up — try refreshing in a moment.'
+            );
+          }
+        }
       }
 
-      try {
-        setSession(savedSession);
-        await hydrateProfile(savedSession);
-      } catch {
-        resetAuth();
-      } finally {
-        setLoading(false);
-      }
+      if (mounted) setLoading(false);
     };
 
-    hydrate();
+    init();
+
+    // Listen for auth state changes (login, logout, token refresh)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (!mounted) return;
+
+      setSession(newSession);
+      setUser(newSession?.user ?? null);
+      setAuthError(null);
+
+      if (newSession?.user) {
+        // Small delay to let the DB trigger create the profile on first signup
+        if (event === 'SIGNED_IN') {
+          await new Promise((r) => setTimeout(r, 800));
+        }
+        const p = await fetchProfile(newSession.user.id);
+        if (mounted) {
+          setProfile(p);
+          if (!p) {
+            setAuthError(
+              'Profile not found. Your account may still be setting up — try refreshing in a moment.'
+            );
+          }
+        }
+      } else {
+        setProfile(null);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
-    try {
-      const nextSession = await signInWithEmail(email, password);
-      setSession(nextSession);
-      persistSession(nextSession);
-      await hydrateProfile(nextSession);
-      return { error: null };
-    } catch (err) {
-      resetAuth();
-      return { error: err instanceof Error ? err.message : 'Login failed.' };
-    }
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { error: error.message };
+    // Profile is loaded via onAuthStateChange
+    return { error: null };
   };
 
-  const signUp = async (email: string, password: string, fullName: string, role: 'owner' | 'manager') => {
-    try {
-      const nextSession = await signUpWithEmail(email, password);
-      await createProfile(nextSession.localId, nextSession.idToken, { email, fullName, role });
-      await logout();
-      return { error: null };
-    } catch (err) {
-      return { error: err instanceof Error ? err.message : 'Account creation failed.' };
-    }
+  const signUp = async (
+    email: string,
+    password: string,
+    fullName: string,
+    role: 'owner' | 'manager'
+  ) => {
+    setAuthError(null);
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: fullName, role },
+        // No emailRedirectTo - we handle routing ourselves
+      },
+    });
+    if (error) return { error: error.message };
+    return { error: null };
   };
 
   const logout = async () => {
-    resetAuth();
+    await supabase.auth.signOut();
+    setProfile(null);
+    setUser(null);
+    setSession(null);
+    setAuthError(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, session, loading, authError, login, logout, signUp }}>
+    <AuthContext.Provider
+      value={{ user, profile, session, loading, authError, login, logout, signUp }}
+    >
       {children}
     </AuthContext.Provider>
   );
