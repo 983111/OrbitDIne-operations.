@@ -25,10 +25,8 @@ export function Login() {
       if (error) {
         setError(error);
         setLoading(false);
-        return;
       }
-
-      // Keep spinner until auth state redirects user to protected route.
+      // On success: auth state change → App.tsx redirects automatically
     } else {
       if (password.length < 6) {
         setError('Password must be at least 6 characters.');
@@ -38,18 +36,24 @@ export function Login() {
       const { error } = await signUp(email, password, fullName, role);
       if (error) {
         setError(error);
+        setLoading(false);
       } else {
+        // Supabase may require email confirmation depending on your project settings.
+        // If email confirmation is OFF (recommended for dev), user is signed in immediately.
+        // Show success and let them log in.
         setSignUpSuccess(true);
+        setLoading(false);
       }
-      setLoading(false);
     }
   };
+
+  const displayError = error || authError;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#1a2035] via-[#241b3d] to-[#1a1025] p-6">
       <div className="max-w-5xl w-full grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-        
-        {/* Left */}
+
+        {/* Left branding */}
         <div className="text-white space-y-6">
           <div className="inline-flex items-center px-3 py-1 rounded-full border border-blue-400/30 bg-blue-500/10 text-blue-300 text-xs font-bold tracking-widest uppercase">
             <ShieldCheck className="w-4 h-4 mr-2" />
@@ -63,20 +67,23 @@ export function Login() {
           </p>
         </div>
 
-        {/* Right - Form */}
+        {/* Right form */}
         <div className="bg-[#f8f9fa] rounded-3xl p-8 lg:p-10 shadow-2xl">
           {signUpSuccess ? (
             <div className="text-center space-y-4 py-8">
               <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
                 <ShieldCheck className="w-8 h-8 text-emerald-600" />
               </div>
-              <h2 className="text-2xl font-bold text-slate-900">Account created</h2>
-              <p className="text-slate-500">Your Firebase account for <strong>{email}</strong> is ready. Sign in to continue.</p>
+              <h2 className="text-2xl font-bold text-slate-900">Account Created!</h2>
+              <p className="text-slate-500">
+                Your account for <strong>{email}</strong> is ready.
+                {' '}Sign in to access your portal.
+              </p>
               <button
-                onClick={() => { setMode('login'); setSignUpSuccess(false); }}
+                onClick={() => { setMode('login'); setSignUpSuccess(false); setError(null); }}
                 className="w-full py-3 px-4 bg-[#1d4ed8] text-white rounded-xl font-bold hover:bg-blue-700 transition-colors"
               >
-                Back to Login
+                Sign In Now
               </button>
             </div>
           ) : (
@@ -92,10 +99,10 @@ export function Login() {
                 </p>
               </div>
 
-              {(error || authError) && (
-                <div className="mb-4 flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  {error || authError}
+              {displayError && (
+                <div className="mb-4 flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{displayError}</span>
                 </div>
               )}
 
@@ -181,18 +188,30 @@ export function Login() {
                   disabled={loading}
                   className="w-full flex justify-center items-center py-3.5 px-4 rounded-xl shadow-sm text-base font-bold text-white bg-[#1d4ed8] hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors disabled:opacity-60 disabled:cursor-not-allowed mt-2"
                 >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : mode === 'login' ? 'Sign in' : 'Create Account'}
+                  {loading
+                    ? <Loader2 className="w-5 h-5 animate-spin" />
+                    : mode === 'login' ? 'Sign In' : 'Create Account'}
                 </button>
               </form>
 
               <div className="mt-6 text-center text-sm text-slate-500">
                 {mode === 'login' ? (
                   <>Don't have an account?{' '}
-                    <button onClick={() => { setMode('signup'); setError(null); }} className="text-blue-600 font-semibold hover:underline">Sign up</button>
+                    <button
+                      onClick={() => { setMode('signup'); setError(null); }}
+                      className="text-blue-600 font-semibold hover:underline"
+                    >
+                      Sign up
+                    </button>
                   </>
                 ) : (
                   <>Already have an account?{' '}
-                    <button onClick={() => { setMode('login'); setError(null); }} className="text-blue-600 font-semibold hover:underline">Sign in</button>
+                    <button
+                      onClick={() => { setMode('login'); setError(null); }}
+                      className="text-blue-600 font-semibold hover:underline"
+                    >
+                      Sign in
+                    </button>
                   </>
                 )}
               </div>
