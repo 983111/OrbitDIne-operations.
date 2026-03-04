@@ -74,7 +74,6 @@ export function ManagerDashboard() {
     });
 
     setTables(combined);
-    // Update selected table if open
     setSelectedTable(prev => prev ? combined.find(t => t.id === prev.id) ?? null : null);
     setLoading(false);
   };
@@ -87,7 +86,6 @@ export function ManagerDashboard() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Realtime subscription
     const channel = supabase
       .channel('orders-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchTables)
@@ -111,6 +109,72 @@ export function ManagerDashboard() {
     await supabase.from('orders').update({ status: 'paid' }).eq('id', tableData.orderId);
     setSelectedTable(null);
     fetchTables();
+  };
+
+  const printKitchenSlip = (tableData: TableWithOrder) => {
+    const win = window.open('', '_blank', 'width=400,height=600');
+    if (!win) return;
+    const items = (tableData.items ?? [])
+      .map(item => `
+        <tr>
+          <td style="padding:4px 8px;font-size:14px;">${item.name}</td>
+          <td style="padding:4px 8px;font-size:12px;color:#555;">${(item.customizations ?? []).join(', ')}</td>
+          <td style="padding:4px 8px;font-size:12px;text-transform:uppercase;font-weight:bold;">${item.status}</td>
+        </tr>`)
+      .join('');
+    win.document.write(`
+      <!DOCTYPE html><html><head>
+        <title>Kitchen Slip — Table ${tableData.number}</title>
+        <style>body{font-family:monospace;padding:16px;}h2{margin:0;}table{width:100%;border-collapse:collapse;}tr{border-bottom:1px solid #ddd;}</style>
+      </head><body>
+        <h2>🍽 Table ${tableData.number}</h2>
+        <p style="font-size:12px;color:#777;">Order #${tableData.orderId?.slice(0, 8)} &middot; ${tableData.orderTime ? new Date(tableData.orderTime).toLocaleTimeString() : ''}</p>
+        <table>${items}</table>
+      </body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  const generateBillPdf = (tableData: TableWithOrder) => {
+    const win = window.open('', '_blank', 'width=500,height=700');
+    if (!win) return;
+    const rows = (tableData.items ?? [])
+      .map(item => `
+        <tr>
+          <td style="padding:6px 8px;">${item.name}</td>
+          <td style="padding:6px 8px;text-align:right;">$${item.price.toFixed(2)}</td>
+        </tr>`)
+      .join('');
+    win.document.write(`
+      <!DOCTYPE html><html><head>
+        <title>Bill — Table ${tableData.number}</title>
+        <style>
+          body{font-family:Arial,sans-serif;padding:24px;max-width:400px;margin:auto;}
+          h2{text-align:center;margin-bottom:4px;}
+          p.sub{text-align:center;color:#666;font-size:12px;margin:0 0 16px;}
+          table{width:100%;border-collapse:collapse;}
+          tr{border-bottom:1px solid #eee;}
+          .total td{font-weight:bold;font-size:16px;border-top:2px solid #333;padding-top:8px;}
+          @media print{button{display:none;}}
+        </style>
+      </head><body>
+        <h2>OrbitDine</h2>
+        <p class="sub">Table ${tableData.number} &middot; ${new Date().toLocaleDateString()}</p>
+        <table>
+          <thead><tr><th style="text-align:left;padding:6px 8px;">Item</th><th style="text-align:right;padding:6px 8px;">Price</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot>
+            <tr class="total"><td>Total</td><td style="text-align:right;">$${(tableData.total ?? 0).toFixed(2)}</td></tr>
+          </tfoot>
+        </table>
+        <p style="text-align:center;margin-top:24px;font-size:12px;color:#999;">Thank you for dining with us!</p>
+        <button onclick="window.print()" style="display:block;width:100%;margin-top:16px;padding:10px;background:#4f46e5;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;">
+          Print / Save as PDF
+        </button>
+      </body></html>`);
+    win.document.close();
+    win.focus();
   };
 
   const activeTables = tables.filter(t => t.status !== 'available').length;
@@ -297,10 +361,14 @@ export function ManagerDashboard() {
 
             {selectedTable.status !== 'available' && (
               <div className="p-6 border-t border-slate-200 bg-slate-50 space-y-3">
-                <button className="w-full flex items-center justify-center py-3 px-4 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors shadow-sm">
+                <button
+                  onClick={() => printKitchenSlip(selectedTable)}
+                  className="w-full flex items-center justify-center py-3 px-4 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors shadow-sm">
                   <Printer className="w-5 h-5 mr-2" />Print Kitchen Slip
                 </button>
-                <button className="w-full flex items-center justify-center py-3 px-4 bg-white border border-slate-300 text-slate-700 rounded-xl font-medium hover:bg-slate-50 transition-colors shadow-sm">
+                <button
+                  onClick={() => generateBillPdf(selectedTable)}
+                  className="w-full flex items-center justify-center py-3 px-4 bg-white border border-slate-300 text-slate-700 rounded-xl font-medium hover:bg-slate-50 transition-colors shadow-sm">
                   <FileText className="w-5 h-5 mr-2" />Generate Bill PDF
                 </button>
                 {selectedTable.status === 'bill_requested' && (
