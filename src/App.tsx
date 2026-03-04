@@ -12,12 +12,17 @@ import { TableConfig } from './pages/owner/TableConfig';
 import { ManagerPermissions } from './pages/owner/ManagerPermissions';
 import { Settings } from './pages/owner/Settings';
 import { Feedback } from './pages/owner/Feedback';
-import { Loader2 } from 'lucide-react';
+import { Loader2, UtensilsCrossed } from 'lucide-react';
 
-function FullPageSpinner() {
+function FullPageSpinner({ message = 'Loading...' }: { message?: string }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
+      <div className="flex items-center gap-3 mb-2">
+        <UtensilsCrossed className="w-8 h-8 text-indigo-600" />
+        <span className="text-2xl font-bold text-slate-800">OrbitDine</span>
+      </div>
       <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+      <p className="text-slate-500 text-sm">{message}</p>
     </div>
   );
 }
@@ -31,32 +36,31 @@ function ProtectedRoute({
 }) {
   const { user, profile, loading, authError } = useAuth();
 
-  if (loading) return <FullPageSpinner />;
+  if (loading) return <FullPageSpinner message="Setting up your account..." />;
 
-  // Not logged in at all
   if (!user) return <Navigate to="/login" replace />;
 
-  // Logged in but profile not loaded yet (DB trigger delay)
   if (!profile) {
     if (authError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-slate-50">
-          <div className="text-center max-w-md px-6">
-            <p className="text-slate-700 font-medium mb-4">{authError}</p>
+          <div className="text-center max-w-md px-6 space-y-4">
+            <UtensilsCrossed className="w-12 h-12 text-indigo-400 mx-auto" />
+            <h2 className="text-xl font-bold text-slate-800">Almost ready...</h2>
+            <p className="text-slate-600 text-sm">{authError}</p>
             <button
               onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium"
+              className="px-6 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
             >
-              Refresh
+              Refresh Page
             </button>
           </div>
         </div>
       );
     }
-    return <FullPageSpinner />;
+    return <FullPageSpinner message="Loading your profile..." />;
   }
 
-  // Wrong role — redirect to correct portal
   if (profile.role !== allowedRole) {
     return <Navigate to={`/${profile.role}`} replace />;
   }
@@ -67,7 +71,7 @@ function ProtectedRoute({
 function AppRoutes() {
   const { user, profile, loading } = useAuth();
 
-  if (loading) return <FullPageSpinner />;
+  if (loading) return <FullPageSpinner message="Authenticating..." />;
 
   return (
     <Routes>
