@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { Database } from '../lib/database.types';
@@ -24,68 +24,52 @@ interface AuthState {
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
 async function fetchProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
-
-  if (error || !data) return null;
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) {
+      console.error('fetchProfile error:', error.message, error.code);
+      return null;
+    }
+    return data ?? null;
+  } catch (err) {
+    console.error('fetchProfile unexpected error:', err);
+    return null;
+  }
 }
 
-/**
- * If the user has no restaurant_id, find or create a default restaurant
- * and assign it to their profile.
- */
-async function ensureRestaurant(profile: Profile): Promise<Profile> {
-  if (profile.restaurant_id) return profile;
-
+async function fetchOrCreateRestaurant(profileId: string): Promise<string | null> {
   try {
-    // Try to find an existing restaurant
-    const { data: existing, error: fetchError } = await supabase
+    const { data: existing } = await supabase
       .from('restaurants')
       .select('id')
       .limit(1)
       .maybeSingle();
 
-    let restaurantId: string | null = null;
-
-    if (!fetchError && existing?.id) {
-      restaurantId = existing.id;
-    } else {
-      // Create a default restaurant
-      const { data: created, error: createError } = await supabase
-        .from('restaurants')
-        .insert({ name: 'My Restaurant', theme: 'modern', is_operational: true })
-        .select('id')
-        .single();
-
-      if (createError || !created) {
-        console.error('Failed to create restaurant:', createError?.message);
-        // Return profile as-is; the UI will still load, just without restaurant data
-        return profile;
-      }
-      restaurantId = created.id;
+    if (existing?.id) {
+      await supabase.from('profiles').update({ restaurant_id: existing.id }).eq('id', profileId);
+      return existing.id;
     }
 
-    if (!restaurantId) return profile;
+    const { data: created, error } = await supabase
+      .from('restaurants')
+      .insert({ name: 'My Restaurant', theme: 'modern', is_operational: true })
+      .select('id')
+      .single();
 
-    // Assign to profile
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({ restaurant_id: restaurantId })
-      .eq('id', profile.id);
-
-    if (updateError) {
-      console.error('Failed to assign restaurant to profile:', updateError.message);
-      return profile;
+    if (error || !created) {
+      console.error('Failed to create restaurant:', error?.message);
+      return null;
     }
 
-    return { ...profile, restaurant_id: restaurantId };
+    await supabase.from('profiles').update({ restaurant_id: created.id }).eq('id', profileId);
+    return created.id;
   } catch (err) {
-    console.error('ensureRestaurant unexpected error:', err);
-    return profile;
+    console.error('fetchOrCreateRestaurant error:', err);
+    return null;
   }
 }
 
@@ -96,102 +80,109 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const loadProfile = async (userId: string, isNewSignIn = false) => {
-    // Small delay on new sign-in to allow DB trigger to fire
-    if (isNewSignIn) {
-      await new Promise((r) => setTimeout(r, 1200));
-    }
+  // Prevent duplicate profile loads
+  const profileLoadInProgress = useRef(false);
+  const initDone = useRef(false);
 
-    let p = await fetchProfile(userId);
+  const loadAndSetProfile = async (userId: string, retryOnMiss = false) => {
+    if (profileLoadInProgress.current) return;
+    profileLoadInProgress.current = true;
 
-    if (!p) {
-      // Retry once after another delay
-      await new Promise((r) => setTimeout(r, 1500));
-      p = await fetchProfile(userId);
-    }
+    try {
+      let p = await fetchProfile(userId);
 
-    if (!p) {
-      setAuthError('Profile not found. Please try refreshing the page.');
-      return null;
-    }
-
-    // For owners: ensure they have a restaurant assigned
-    // Wrap in try/catch so a RLS error doesn't block the whole auth flow
-    if (p.role === 'owner') {
-      try {
-        p = await ensureRestaurant(p);
-      } catch (err) {
-        console.error('ensureRestaurant failed, continuing without restaurant:', err);
+      // New signup: profile row may not exist yet — retry once after delay
+      if (!p && retryOnMiss) {
+        await new Promise((r) => setTimeout(r, 1500));
+        p = await fetchProfile(userId);
       }
-    }
 
-    return p;
+      if (!p) {
+        setAuthError('Profile not found. Please refresh the page or contact support.');
+        setLoading(false);
+        return;
+      }
+
+      // Owner: ensure restaurant exists and is linked
+      if (p.role === 'owner' && !p.restaurant_id) {
+        const rid = await fetchOrCreateRestaurant(p.id);
+        if (rid) p = { ...p, restaurant_id: rid };
+      }
+
+      setProfile(p);
+      setAuthError(null);
+    } catch (err) {
+      console.error('loadAndSetProfile error:', err);
+      setAuthError('Failed to load profile. Please refresh.');
+    } finally {
+      profileLoadInProgress.current = false;
+      setLoading(false);
+    }
   };
 
-  // On mount: restore session from storage and fetch profile
   useEffect(() => {
-    let mounted = true;
-
-    const init = async () => {
-      try {
-        const {
-          data: { session: existingSession },
-        } = await supabase.auth.getSession();
-
-        if (!mounted) return;
-
+    // Step 1: Check for existing session on mount
+    supabase.auth.getSession()
+      .then(({ data: { session: existingSession } }) => {
+        initDone.current = true;
         if (existingSession?.user) {
           setSession(existingSession);
           setUser(existingSession.user);
-          const p = await loadProfile(existingSession.user.id);
-          if (mounted) setProfile(p);
-        }
-      } catch (err) {
-        console.error('Auth init error:', err);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    init();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      if (!mounted) return;
-
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
-      setAuthError(null);
-
-      if (newSession?.user) {
-        // Don't block loading state here — set loading false after profile loads
-        const p = await loadProfile(newSession.user.id, event === 'SIGNED_IN');
-        if (mounted) {
-          setProfile(p);
+          // loadAndSetProfile will call setLoading(false)
+          loadAndSetProfile(existingSession.user.id, false);
+        } else {
           setLoading(false);
         }
-      } else {
-        setProfile(null);
-        if (mounted) setLoading(false);
-      }
-    });
+      })
+      .catch((err) => {
+        console.error('getSession error:', err);
+        initDone.current = true;
+        setLoading(false);
+      });
 
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
+    // Step 2: Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, newSession) => {
+        console.log('[Auth]', event, newSession?.user?.email ?? 'no user');
+
+        if (event === 'SIGNED_OUT') {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setAuthError(null);
+          setLoading(false);
+          return;
+        }
+
+        if (event === 'TOKEN_REFRESHED') {
+          // Just update session, keep existing profile
+          setSession(newSession);
+          return;
+        }
+
+        if (event === 'INITIAL_SESSION') {
+          // getSession() above already handles this — skip to avoid double load
+          return;
+        }
+
+        // SIGNED_IN (and any other events with a user)
+        if (newSession?.user) {
+          setSession(newSession);
+          setUser(newSession.user);
+          setLoading(true);
+          await loadAndSetProfile(newSession.user.id, true);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<{ error: string | null }> => {
     setAuthError(null);
-    setLoading(true); // Show spinner during login
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      setLoading(false);
-      return { error: error.message };
-    }
-    // loading will be set to false inside onAuthStateChange handler
+    if (error) return { error: error.message };
+    // onAuthStateChange SIGNED_IN will handle loading the profile
     return { error: null };
   };
 
@@ -200,32 +191,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password: string,
     fullName: string,
     role: 'owner' | 'manager'
-  ) => {
+  ): Promise<{ error: string | null }> => {
     setAuthError(null);
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: { full_name: fullName, role },
-      },
+      options: { data: { full_name: fullName, role } },
     });
     if (error) return { error: error.message };
     return { error: null };
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    // Clear state immediately for instant UI response
     setProfile(null);
     setUser(null);
     setSession(null);
     setAuthError(null);
     setLoading(false);
+    await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider
-      value={{ user, profile, session, loading, authError, login, logout, signUp }}
-    >
+    <AuthContext.Provider value={{ user, profile, session, loading, authError, login, logout, signUp }}>
       {children}
     </AuthContext.Provider>
   );
