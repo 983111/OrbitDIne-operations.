@@ -224,6 +224,7 @@ export type Database = {
       restaurants: {
         Row: {
           created_at: string
+          floor_map_url: string | null
           id: string
           is_operational: boolean
           name: string
@@ -231,6 +232,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          floor_map_url?: string | null
           id?: string
           is_operational?: boolean
           name: string
@@ -238,6 +240,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          floor_map_url?: string | null
           id?: string
           is_operational?: boolean
           name?: string
@@ -248,26 +251,38 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          label: string | null
           number: number
+          pos_x: number
+          pos_y: number
           qr_code_url: string | null
           restaurant_id: string
           seats: number
+          shape: string
         }
         Insert: {
           created_at?: string
           id?: string
+          label?: string | null
           number: number
+          pos_x?: number
+          pos_y?: number
           qr_code_url?: string | null
           restaurant_id: string
           seats?: number
+          shape?: string
         }
         Update: {
           created_at?: string
           id?: string
+          label?: string | null
           number?: number
+          pos_x?: number
+          pos_y?: number
           qr_code_url?: string | null
           restaurant_id?: string
           seats?: number
+          shape?: string
         }
       }
     }
