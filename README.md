@@ -2,11 +2,9 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# OrbitDine Operations
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/1e8e2ceb-9198-4171-aef3-59208dbd3460
+This repository contains the OrbitDine operations web app for owners and managers.
 
 ## Run Locally
 
@@ -15,6 +13,6 @@ View your app in AI Studio: https://ai.studio/apps/1e8e2ceb-9198-4171-aef3-59208
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Configure your environment variables in `.env.local`.
 3. Run the app:
    `npm run dev`
