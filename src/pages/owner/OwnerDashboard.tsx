@@ -1,461 +1,227 @@
-import { useState, useEffect } from 'react';
-import {
-  TrendingUp,
-  Users,
-  DollarSign,
-  Star,
-  ArrowUpRight,
-  ArrowDownRight,
-  Activity,
-  Loader2,
-} from 'lucide-react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
-import { supabase } from '../../lib/supabase';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../store/AuthContext';
-import { startOfDay, endOfDay, subDays, format } from 'date-fns';
+import { supabase } from '../../lib/supabase';
+import { StatCard, PageHeader, EmptyState } from '../../components/ui';
+import { cn, formatCurrency } from '../../lib/utils';
+import {
+  DollarSign, Users, Utensils, TrendingUp, Clock,
+  CheckCircle2, AlertTriangle, Loader2, ChefHat,
+} from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 
-interface HourlyRevenue {
-  time: string;
-  value: number;
-}
-
-interface TopItem {
-  name: string;
-  sales: number;
-  revenue: number;
-}
-
-interface DashboardStats {
+interface DashboardData {
+  totalRevenue: number;
   todayRevenue: number;
-  yesterdayRevenue: number;
-  todayOrders: number;
-  yesterdayOrders: number;
   activeTables: number;
   totalTables: number;
-  avgRating: number | null;
-  lastWeekRating: number | null;
-  hourlyRevenue: HourlyRevenue[];
-  topItems: TopItem[];
+  totalOrders: number;
+  todayOrders: number;
+  avgOrderValue: number;
+  recentOrders: Array<{
+    id: string;
+    tableNumber: number;
+    total: number;
+    status: string;
+    createdAt: string;
+    itemCount: number;
+  }>;
+  tableStatuses: Array<{ number: number; status: string; total?: number }>;
 }
+
+const ORDER_STATUS: Record<string, { label: string; color: string }> = {
+  open:            { label: 'Dining',         color: 'text-amber-400' },
+  bill_requested:  { label: 'Bill Requested', color: 'text-indigo-400' },
+  paid:            { label: 'Paid',           color: 'text-emerald-400' },
+  cancelled:       { label: 'Cancelled',      color: 'text-red-400' },
+};
 
 export function OwnerDashboard() {
   const { profile } = useAuth();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-
   const restaurantId = profile?.restaurant_id;
 
-  useEffect(() => {
+  const fetchDashboard = useCallback(async () => {
     if (!restaurantId) return;
 
-    const fetchStats = async () => {
-      setLoading(true);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-      const now = new Date();
-      const todayStart = startOfDay(now).toISOString();
-      const todayEnd = endOfDay(now).toISOString();
-      const yesterdayStart = startOfDay(subDays(now, 1)).toISOString();
-      const yesterdayEnd = endOfDay(subDays(now, 1)).toISOString();
-      const lastWeekStart = startOfDay(subDays(now, 7)).toISOString();
-      const lastWeekEnd = endOfDay(subDays(now, 1)).toISOString();
+    const [
+      { data: orders },
+      { data: tables },
+      { data: openOrders },
+    ] = await Promise.all([
+      supabase.from('orders').select('id, total, status, created_at, table_id').eq('restaurant_id', restaurantId),
+      supabase.from('tables').select('id, number, seats').eq('restaurant_id', restaurantId).order('number'),
+      supabase.from('orders').select('id, total, status, created_at, table_id, order_items(id)').eq('restaurant_id', restaurantId).in('status', ['open', 'bill_requested']).order('created_at', { ascending: false }),
+    ]);
 
-      const [
-        { data: todayOrders },
-        { data: yesterdayOrders },
-        { data: activeTables },
-        { data: allTables },
-        { data: todayFeedback },
-        { data: lastWeekFeedback },
-        { data: topItemsData },
-      ] = await Promise.all([
-        supabase
-          .from('orders')
-          .select('total, created_at')
-          .eq('restaurant_id', restaurantId)
-          .gte('created_at', todayStart)
-          .lte('created_at', todayEnd),
-        supabase
-          .from('orders')
-          .select('total')
-          .eq('restaurant_id', restaurantId)
-          .gte('created_at', yesterdayStart)
-          .lte('created_at', yesterdayEnd),
-        supabase
-          .from('orders')
-          .select('table_id')
-          .eq('restaurant_id', restaurantId)
-          .in('status', ['open', 'bill_requested']),
-        supabase
-          .from('tables')
-          .select('id')
-          .eq('restaurant_id', restaurantId),
-        supabase
-          .from('feedback')
-          .select('rating')
-          .eq('restaurant_id', restaurantId)
-          .gte('created_at', todayStart),
-        supabase
-          .from('feedback')
-          .select('rating')
-          .eq('restaurant_id', restaurantId)
-          .gte('created_at', lastWeekStart)
-          .lte('created_at', lastWeekEnd),
-        supabase
-          .from('order_items')
-          .select('name, price')
-          .in(
-            'order_id',
-            (
-              await supabase
-                .from('orders')
-                .select('id')
-                .eq('restaurant_id', restaurantId)
-                .gte('created_at', todayStart)
-            ).data?.map((o) => o.id) ?? []
-          ),
-      ]);
+    const allOrders = orders ?? [];
+    const todayOrders = allOrders.filter(o => new Date(o.created_at) >= today);
+    const paidOrders = allOrders.filter(o => o.status === 'paid');
 
-      // Today revenue & hourly breakdown
-      const todayRevenue = (todayOrders ?? []).reduce(
-        (sum, o) => sum + Number(o.total),
-        0
-      );
-      const yesterdayRevenue = (yesterdayOrders ?? []).reduce(
-        (sum, o) => sum + Number(o.total),
-        0
-      );
+    // Build table status map
+    const openMap: Record<string, { status: string; total: number }> = {};
+    for (const o of openOrders ?? []) {
+      openMap[o.table_id] = { status: o.status, total: Number(o.total) };
+    }
 
-      // Build hourly buckets (10am–10pm)
-      const hourlyMap: Record<string, number> = {};
-      for (let h = 10; h <= 22; h++) {
-        hourlyMap[`${h > 12 ? h - 12 : h}${h >= 12 ? 'pm' : 'am'}`] = 0;
-      }
-      (todayOrders ?? []).forEach((o) => {
-        const h = new Date(o.created_at).getHours();
-        const label = `${h > 12 ? h - 12 : h}${h >= 12 ? 'pm' : 'am'}`;
-        if (label in hourlyMap) hourlyMap[label] += Number(o.total);
-      });
-      const hourlyRevenue: HourlyRevenue[] = Object.entries(hourlyMap).map(
-        ([time, value]) => ({ time, value })
-      );
+    const tableStatuses = (tables ?? []).map(t => ({
+      number: t.number,
+      status: openMap[t.id]?.status ?? 'available',
+      total: openMap[t.id]?.total,
+    }));
 
-      // Active unique tables
-      const uniqueActive = new Set((activeTables ?? []).map((o) => o.table_id))
-        .size;
+    // Recent orders with table numbers
+    const tableNumMap: Record<string, number> = {};
+    for (const t of tables ?? []) tableNumMap[t.id] = t.number;
 
-      // Ratings
-      const avgRating =
-        (todayFeedback ?? []).length > 0
-          ? (todayFeedback ?? []).reduce((s, f) => s + f.rating, 0) /
-            (todayFeedback ?? []).length
-          : null;
-      const lastWeekRating =
-        (lastWeekFeedback ?? []).length > 0
-          ? (lastWeekFeedback ?? []).reduce((s, f) => s + f.rating, 0) /
-            (lastWeekFeedback ?? []).length
-          : null;
+    const recentOrders = (openOrders ?? []).slice(0, 8).map(o => ({
+      id: o.id,
+      tableNumber: tableNumMap[o.table_id] ?? 0,
+      total: Number(o.total),
+      status: o.status,
+      createdAt: o.created_at,
+      itemCount: o.order_items?.length ?? 0,
+    }));
 
-      // Top items
-      const itemMap: Record<string, { sales: number; revenue: number }> = {};
-      (topItemsData ?? []).forEach((item) => {
-        if (!itemMap[item.name])
-          itemMap[item.name] = { sales: 0, revenue: 0 };
-        itemMap[item.name].sales += 1;
-        itemMap[item.name].revenue += Number(item.price);
-      });
-      const topItems: TopItem[] = Object.entries(itemMap)
-        .map(([name, v]) => ({ name, ...v }))
-        .sort((a, b) => b.sales - a.sales)
-        .slice(0, 4);
-
-      setStats({
-        todayRevenue,
-        yesterdayRevenue,
-        todayOrders: (todayOrders ?? []).length,
-        yesterdayOrders: (yesterdayOrders ?? []).length,
-        activeTables: uniqueActive,
-        totalTables: (allTables ?? []).length,
-        avgRating,
-        lastWeekRating,
-        hourlyRevenue,
-        topItems,
-      });
-      setLoading(false);
-    };
-
-    fetchStats();
+    setData({
+      totalRevenue: paidOrders.reduce((s, o) => s + Number(o.total), 0),
+      todayRevenue: todayOrders.filter(o => o.status === 'paid').reduce((s, o) => s + Number(o.total), 0),
+      activeTables: Object.keys(openMap).length,
+      totalTables: (tables ?? []).length,
+      totalOrders: allOrders.length,
+      todayOrders: todayOrders.length,
+      avgOrderValue: paidOrders.length ? paidOrders.reduce((s, o) => s + Number(o.total), 0) / paidOrders.length : 0,
+      recentOrders,
+      tableStatuses,
+    });
+    setLoading(false);
   }, [restaurantId]);
 
-  const pctChange = (curr: number, prev: number) => {
-    if (prev === 0) return null;
-    return ((curr - prev) / prev) * 100;
+  useEffect(() => {
+    fetchDashboard();
+    const ch = supabase.channel('owner-dash').on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchDashboard).subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [fetchDashboard]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <Loader2 className="w-7 h-7 animate-spin text-orange-500" />
+    </div>
+  );
+
+  if (!data) return <EmptyState icon={ChefHat} title="No data yet" description="Start adding tables and taking orders." />;
+
+  const tableStatusColor: Record<string, string> = {
+    available:     'bg-emerald-500/20 border-emerald-500/30 text-emerald-400',
+    open:          'bg-amber-500/20 border-amber-500/30 text-amber-400',
+    bill_requested:'bg-indigo-500/20 border-indigo-500/30 text-indigo-400',
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-      </div>
-    );
-  }
-
-  const revenueChange = stats ? pctChange(stats.todayRevenue, stats.yesterdayRevenue) : null;
-  const ordersChange = stats ? pctChange(stats.todayOrders, stats.yesterdayOrders) : null;
-  const ratingDiff =
-    stats?.avgRating != null && stats?.lastWeekRating != null
-      ? stats.avgRating - stats.lastWeekRating
-      : null;
-
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-          Dashboard Overview
-        </h1>
-        <p className="text-slate-500 mt-2">
-          Here's what's happening at your restaurant today.
-        </p>
+    <div className="space-y-8 animate-fade-up">
+      <PageHeader
+        title={`Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, ${profile?.full_name?.split(' ')[0] ?? 'Chef'} 👋`}
+        subtitle="Here's your restaurant's live overview"
+      />
+
+      {/* KPI row */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <StatCard label="Today's Revenue"  value={formatCurrency(data.todayRevenue)}  sub={`All time: ${formatCurrency(data.totalRevenue)}`} icon={DollarSign}  color="orange"  trend={{ value: `${data.todayOrders} orders today`, up: true }} />
+        <StatCard label="Active Tables"    value={`${data.activeTables} / ${data.totalTables}`} sub="Tables currently in use"  icon={Users}       color="emerald" />
+        <StatCard label="Today's Orders"   value={String(data.todayOrders)}           sub={`${data.totalOrders} total`}        icon={Utensils}    color="indigo"  />
+        <StatCard label="Avg Order Value"  value={formatCurrency(data.avgOrderValue)} sub="Across all paid orders"             icon={TrendingUp}  color="amber"   />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Revenue */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm font-medium text-slate-500">Today's Revenue</p>
-              <h3 className="text-3xl font-bold text-slate-900 mt-2">
-                ${(stats?.todayRevenue ?? 0).toFixed(2)}
-              </h3>
-            </div>
-            <div className="p-3 bg-emerald-50 rounded-xl">
-              <DollarSign className="w-6 h-6 text-emerald-600" />
-            </div>
-          </div>
-          <div className="mt-4 flex items-center text-sm">
-            {revenueChange !== null ? (
-              revenueChange >= 0 ? (
-                <>
-                  <ArrowUpRight className="w-4 h-4 text-emerald-500 mr-1" />
-                  <span className="text-emerald-500 font-medium">
-                    +{revenueChange.toFixed(1)}%
-                  </span>
-                </>
-              ) : (
-                <>
-                  <ArrowDownRight className="w-4 h-4 text-red-500 mr-1" />
-                  <span className="text-red-500 font-medium">
-                    {revenueChange.toFixed(1)}%
-                  </span>
-                </>
-              )
-            ) : (
-              <span className="text-slate-400">No data yet</span>
-            )}
-            {revenueChange !== null && (
-              <span className="text-slate-400 ml-2">vs yesterday</span>
-            )}
-          </div>
-        </div>
-
-        {/* Orders */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm font-medium text-slate-500">Total Orders</p>
-              <h3 className="text-3xl font-bold text-slate-900 mt-2">
-                {stats?.todayOrders ?? 0}
-              </h3>
-            </div>
-            <div className="p-3 bg-indigo-50 rounded-xl">
-              <Activity className="w-6 h-6 text-indigo-600" />
-            </div>
-          </div>
-          <div className="mt-4 flex items-center text-sm">
-            {ordersChange !== null ? (
-              ordersChange >= 0 ? (
-                <>
-                  <ArrowUpRight className="w-4 h-4 text-emerald-500 mr-1" />
-                  <span className="text-emerald-500 font-medium">
-                    +{ordersChange.toFixed(1)}%
-                  </span>
-                </>
-              ) : (
-                <>
-                  <ArrowDownRight className="w-4 h-4 text-red-500 mr-1" />
-                  <span className="text-red-500 font-medium">
-                    {ordersChange.toFixed(1)}%
-                  </span>
-                </>
-              )
-            ) : (
-              <span className="text-slate-400">No data yet</span>
-            )}
-            {ordersChange !== null && (
-              <span className="text-slate-400 ml-2">vs yesterday</span>
-            )}
-          </div>
-        </div>
-
-        {/* Active Tables */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm font-medium text-slate-500">Active Tables</p>
-              <h3 className="text-3xl font-bold text-slate-900 mt-2">
-                {stats?.activeTables ?? 0} / {stats?.totalTables ?? 0}
-              </h3>
-            </div>
-            <div className="p-3 bg-blue-50 rounded-xl">
-              <Users className="w-6 h-6 text-blue-600" />
-            </div>
-          </div>
-          <div className="mt-4 flex items-center text-sm">
-            <span className="text-slate-500 font-medium">
-              {stats && stats.totalTables > 0
-                ? `${Math.round((stats.activeTables / stats.totalTables) * 100)}% Capacity`
-                : 'No tables configured'}
-            </span>
-          </div>
-        </div>
-
-        {/* Rating */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm font-medium text-slate-500">Average Rating</p>
-              <h3 className="text-3xl font-bold text-slate-900 mt-2">
-                {stats?.avgRating != null
-                  ? stats.avgRating.toFixed(1)
-                  : '—'}
-              </h3>
-            </div>
-            <div className="p-3 bg-amber-50 rounded-xl">
-              <Star className="w-6 h-6 text-amber-500" />
-            </div>
-          </div>
-          <div className="mt-4 flex items-center text-sm">
-            {ratingDiff !== null ? (
-              ratingDiff >= 0 ? (
-                <>
-                  <ArrowUpRight className="w-4 h-4 text-emerald-500 mr-1" />
-                  <span className="text-emerald-500 font-medium">
-                    +{ratingDiff.toFixed(1)}
-                  </span>
-                  <span className="text-slate-400 ml-2">vs last week</span>
-                </>
-              ) : (
-                <>
-                  <ArrowDownRight className="w-4 h-4 text-red-500 mr-1" />
-                  <span className="text-red-500 font-medium">
-                    {ratingDiff.toFixed(1)}
-                  </span>
-                  <span className="text-slate-400 ml-2">vs last week</span>
-                </>
-              )
-            ) : (
-              <span className="text-slate-400">No ratings today</span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Revenue Chart */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-slate-900">Revenue Today</h3>
-          </div>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={stats?.hourlyRevenue ?? []}
-                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  vertical={false}
-                  stroke="#e2e8f0"
-                />
-                <XAxis
-                  dataKey="time"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: '#64748b', fontSize: 12 }}
-                  dy={10}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: '#64748b', fontSize: 12 }}
-                  tickFormatter={(val) => `$${val}`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    borderRadius: '12px',
-                    border: 'none',
-                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                  }}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Revenue']}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#4f46e5"
-                  strokeWidth={3}
-                  fillOpacity={1}
-                  fill="url(#colorValue)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Top Items */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-slate-900">Top Selling Items</h3>
-          </div>
-          {(stats?.topItems ?? []).length === 0 ? (
-            <div className="text-center text-slate-400 mt-10">
-              <TrendingUp className="w-10 h-10 mx-auto mb-3 opacity-20" />
-              <p className="text-sm">No orders yet today</p>
-            </div>
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+        {/* Live floor grid */}
+        <div className="xl:col-span-3 glass rounded-2xl p-6 space-y-5">
+          <h2 className="text-sm font-bold text-[#F0F0FF]">Live Floor</h2>
+          {data.tableStatuses.length === 0 ? (
+            <EmptyState icon={Users} title="No tables configured" description="Go to Tables in Settings to add them." />
           ) : (
-            <div className="space-y-6">
-              {(stats?.topItems ?? []).map((item, i) => (
-                <div key={i} className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 font-bold mr-4">
-                      #{i + 1}
-                    </div>
-                    <div>
-                      <p className="font-medium text-slate-900">{item.name}</p>
-                      <p className="text-sm text-slate-500">{item.sales} orders</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-slate-900">
-                      ${item.revenue.toFixed(2)}
-                    </p>
-                  </div>
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-2.5">
+              {data.tableStatuses.map(t => (
+                <div key={t.number} className={cn(
+                  'rounded-xl border p-3 text-center transition-all',
+                  tableStatusColor[t.status] ?? tableStatusColor.available,
+                )}>
+                  <p className="text-sm font-bold">T{t.number}</p>
+                  {t.total != null && t.total > 0 && (
+                    <p className="text-[10px] mt-0.5 font-semibold opacity-80">${t.total.toFixed(0)}</p>
+                  )}
                 </div>
               ))}
             </div>
           )}
+          <div className="flex gap-4 text-[11px] text-[#6B6B9A] pt-1 border-t border-white/[0.05]">
+            {[['available', 'bg-emerald-400', 'Available'], ['open', 'bg-amber-400', 'Dining'], ['bill_requested', 'bg-indigo-400', 'Bill Requested']].map(([, dot, label]) => (
+              <span key={label} className="flex items-center gap-1.5">
+                <span className={cn('w-2 h-2 rounded-full', dot)} /> {label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent orders */}
+        <div className="xl:col-span-2 glass rounded-2xl p-6 space-y-4">
+          <h2 className="text-sm font-bold text-[#F0F0FF]">Active Orders</h2>
+          {data.recentOrders.length === 0 ? (
+            <EmptyState icon={CheckCircle2} title="All clear!" description="No active orders right now." />
+          ) : (
+            <div className="space-y-2">
+              {data.recentOrders.map(o => {
+                const sc = ORDER_STATUS[o.status] ?? ORDER_STATUS.open;
+                return (
+                  <div key={o.id} className="flex items-center justify-between px-3.5 py-3 bg-white/[0.03] border border-white/[0.06] rounded-xl">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-semibold text-[#F0F0FF]">Table {o.tableNumber}</p>
+                      <p className="text-[11px] text-[#6B6B9A] flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {formatDistanceToNow(new Date(o.createdAt))} · {o.itemCount} items
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-[#F0F0FF]">{formatCurrency(o.total)}</p>
+                      <p className={cn('text-[10px] font-bold uppercase tracking-wider', sc.color)}>{sc.label}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Quick health check */}
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <AlertTriangle className="w-4 h-4 text-amber-400" />
+          <h2 className="text-sm font-bold text-[#F0F0FF]">Quick Health</h2>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[
+            { label: 'Tables Set Up',   value: data.totalTables > 0,     msg: data.totalTables > 0 ? `${data.totalTables} tables` : 'No tables yet' },
+            { label: 'Revenue Today',   value: data.todayRevenue > 0,    msg: data.todayRevenue > 0 ? formatCurrency(data.todayRevenue) : 'No revenue yet' },
+            { label: 'Active Orders',   value: data.activeTables > 0,    msg: data.activeTables > 0 ? `${data.activeTables} tables busy` : 'Restaurant idle' },
+            { label: 'Avg Order',       value: data.avgOrderValue > 0,   msg: data.avgOrderValue > 0 ? formatCurrency(data.avgOrderValue) : 'No data yet' },
+          ].map(item => (
+            <div key={item.label} className="flex items-center gap-2.5">
+              <div className={cn('w-7 h-7 rounded-lg border flex items-center justify-center shrink-0',
+                item.value ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-amber-500/10 border-amber-500/20',
+              )}>
+                {item.value
+                  ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  : <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />}
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold text-[#6B6B9A]">{item.label}</p>
+                <p className="text-xs font-bold text-[#F0F0FF]">{item.msg}</p>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
