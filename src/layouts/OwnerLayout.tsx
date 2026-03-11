@@ -1,83 +1,115 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
-import { LayoutDashboard, LogOut, Bell, Settings, PieChart, Utensils, Users, MessageSquare, AlertTriangle } from 'lucide-react';
+import {
+  LayoutDashboard, LogOut, Settings, PieChart, Utensils,
+  Users, MessageSquare, ChefHat, AlertTriangle, Bell, TableProperties,
+} from 'lucide-react';
 import { cn } from '../lib/utils';
+
+const navItems = [
+  { name: 'Dashboard',   path: '/owner',            icon: LayoutDashboard },
+  { name: 'Analytics',   path: '/owner/analytics',  icon: PieChart },
+  { name: 'Menu',        path: '/owner/menu',        icon: Utensils },
+  { name: 'Tables',      path: '/owner/tables',      icon: TableProperties },
+  { name: 'Managers',    path: '/owner/managers',    icon: Users },
+  { name: 'Feedback',    path: '/owner/feedback',    icon: MessageSquare },
+  { name: 'Settings',    path: '/owner/settings',    icon: Settings },
+];
 
 export function OwnerLayout() {
   const { logout, profile } = useAuth();
   const location = useLocation();
 
-  const navItems = [
-    { name: 'Dashboard', path: '/owner', icon: LayoutDashboard },
-    { name: 'Analytics', path: '/owner/analytics', icon: PieChart },
-    { name: 'Menu Management', path: '/owner/menu', icon: Utensils },
-    { name: 'Table Config', path: '/owner/tables', icon: LayoutDashboard },
-    { name: 'Managers', path: '/owner/managers', icon: Users },
-    { name: 'Feedback', path: '/owner/feedback', icon: MessageSquare },
-    { name: 'Settings', path: '/owner/settings', icon: Settings },
-  ];
+  const initials = (profile?.full_name ?? profile?.email ?? 'O')
+    .split(' ').map(s => s[0]).join('').toUpperCase().slice(0, 2);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-64 bg-slate-900 text-white flex flex-col">
-        <div className="p-6">
-          <h2 className="text-2xl font-bold text-white tracking-tight">Owner Portal</h2>
-          <p className="text-slate-400 text-sm mt-1">{profile?.full_name ?? 'Owner'}</p>
+    <div className="min-h-screen flex bg-[#07070F]">
+
+      {/* ── Sidebar ── */}
+      <aside className="w-60 flex-shrink-0 flex flex-col bg-[#0A0A14] border-r border-white/[0.05]">
+        {/* Logo */}
+        <div className="px-5 py-6 border-b border-white/[0.05]">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-orange-500/20 border border-orange-500/25 flex items-center justify-center">
+              <ChefHat className="w-4.5 h-4.5 text-orange-400" />
+            </div>
+            <div>
+              <p className="text-[#F0F0FF] font-bold text-sm">OrbitDine</p>
+              <p className="text-[#4A4A6A] text-[10px] font-medium">Owner Portal</p>
+            </div>
+          </div>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1 mt-4">
-          {navItems.map((item) => {
+        {/* Nav */}
+        <nav className="flex-1 px-3 py-4 space-y-0.5">
+          {navItems.map(item => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const exact = item.path === '/owner';
+            const active = exact ? location.pathname === item.path : location.pathname.startsWith(item.path);
             return (
-              <Link
-                key={item.name}
-                to={item.path}
+              <Link key={item.name} to={item.path}
                 className={cn(
-                  "flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors",
-                  isActive ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                )}
-              >
-                <Icon className="mr-3 h-5 w-5" />
+                  'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all',
+                  active
+                    ? 'bg-orange-500/15 text-orange-400 border border-orange-500/20'
+                    : 'text-[#6B6B9A] hover:bg-white/[0.04] hover:text-[#C0C0E0]',
+                )}>
+                <Icon className="w-4 h-4 shrink-0" />
                 {item.name}
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
-          <button
-            onClick={logout}
-            className="flex items-center w-full px-4 py-3 text-sm font-medium text-slate-300 rounded-lg hover:bg-slate-800 hover:text-white transition-colors"
-          >
-            <LogOut className="mr-3 h-5 w-5" />
-            Sign Out
+        {/* User section */}
+        <div className="px-3 pb-4 space-y-1 border-t border-white/[0.05] pt-4">
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500/30 to-indigo-500/30 border border-white/10 flex items-center justify-center text-xs font-bold text-[#F0F0FF]">
+              {initials}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-[#E0E0F0] truncate">{profile?.full_name ?? 'Owner'}</p>
+              <p className="text-[10px] text-[#4A4A6A] truncate">{profile?.email}</p>
+            </div>
+          </div>
+          <button onClick={logout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-[#6B6B9A] hover:bg-white/[0.04] hover:text-[#F87171] transition-all">
+            <LogOut className="w-4 h-4" />
+            Sign out
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-8">
-          <div className="flex items-center space-x-4">
-            <select className="bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5">
-              <option>Downtown Location</option>
-            </select>
+      {/* ── Main area ── */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Top bar */}
+        <header className="h-14 px-8 flex items-center justify-between border-b border-white/[0.05] bg-[#07070F]/80 backdrop-blur-xl shrink-0">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-[#6B6B9A]">
+              {navItems.find(n => {
+                const exact = n.path === '/owner';
+                return exact ? location.pathname === n.path : location.pathname.startsWith(n.path);
+              })?.name ?? 'Dashboard'}
+            </span>
           </div>
-          <div className="flex items-center space-x-4">
-            <button className="p-2 text-slate-400 hover:text-slate-500 relative">
-              <Bell className="h-6 w-6" />
-              <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full"></span>
+          <div className="flex items-center gap-3">
+            <button className="relative p-2 text-[#6B6B9A] hover:text-[#F0F0FF] transition-colors">
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-orange-500 rounded-full" />
             </button>
-            <button className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm font-medium flex items-center hover:bg-red-100 transition-colors">
-              <AlertTriangle className="w-4 h-4 mr-2" />
+            <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold hover:bg-red-500/20 transition-colors">
+              <AlertTriangle className="w-3.5 h-3.5" />
               Emergency Stop
             </button>
           </div>
         </header>
-        <div className="flex-1 overflow-auto p-8">
+
+        {/* Page content */}
+        <main className="flex-1 overflow-auto p-8">
           <Outlet />
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
