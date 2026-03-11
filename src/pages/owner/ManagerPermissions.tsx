@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../store/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { PageHeader, EmptyState, Modal, Input, Button, Badge } from '../../components/ui';
+import { PageHeader, EmptyState, Modal, Input, Button, Badge } from '@/components/ui';
 import { cn, formatDate } from '../../lib/utils';
 import { Plus, Trash2, Loader2, Users, Mail, Shield, UserCheck } from 'lucide-react';
-import { useToast } from '../../components/Toast';
+import { useToast } from '@/components/Toast';
 
 interface Manager {
   id: string;

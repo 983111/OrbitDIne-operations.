@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../store/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { PageHeader, EmptyState, Modal, Input, Select, Button, Badge } from '../../components/ui';
+import { PageHeader, EmptyState, Modal, Input, Select, Button, Badge } from '@/components/ui';
 import { cn, formatCurrency } from '../../lib/utils';
 import { Plus, Pencil, Trash2, Loader2, Utensils, Search, Tag } from 'lucide-react';
-import { useToast } from '../../components/Toast';
+import { useToast } from '@/components/Toast';
 
 interface MenuItem {
   id: string;
