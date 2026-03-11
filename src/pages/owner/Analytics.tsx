@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../store/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { StatCard, PageHeader, EmptyState } from '../../components/ui';
+import { StatCard, PageHeader, EmptyState } from '@/components/ui';
 import { cn, formatCurrency } from '../../lib/utils';
 import { BarChart3, DollarSign, ShoppingBag, TrendingUp, Loader2, ChefHat } from 'lucide-react';
 

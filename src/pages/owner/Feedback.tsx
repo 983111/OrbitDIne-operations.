@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../store/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { PageHeader, EmptyState, Badge } from '../../components/ui';
+import { PageHeader, EmptyState, Badge } from '@/components/ui';
 import { cn, formatDate } from '../../lib/utils';
 import { MessageSquare, Star, TrendingUp, Loader2, ThumbsUp, ThumbsDown, Minus } from 'lucide-react';
 

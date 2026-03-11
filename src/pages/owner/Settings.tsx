@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../store/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { PageHeader, Input, Select, Button } from '../../components/ui';
+import { PageHeader, Input, Select, Button } from '@/components/ui';
 import { cn } from '../../lib/utils';
 import { Settings as SettingsIcon, Store, Palette, Clock, AlertTriangle, Loader2, CheckCircle2 } from 'lucide-react';
-import { useToast } from '../../components/Toast';
+import { useToast } from '@/components/Toast';
 
 interface RestaurantSettings {
   id: string;

@@ -7,7 +7,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../store/AuthContext';
-import { useToast } from '../../components/Toast';
+import { useToast } from '@/components/Toast';
 
 type TableStatus = 'available' | 'open' | 'bill_requested';
 

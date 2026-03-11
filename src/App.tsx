@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './store/AuthContext';
-import { ToastProvider } from './components/Toast';
+import { ToastProvider } from '@/components/Toast';
 import { Login } from './pages/Login';
 import { ManagerLayout } from './layouts/ManagerLayout';
 import { OwnerLayout } from './layouts/OwnerLayout';
