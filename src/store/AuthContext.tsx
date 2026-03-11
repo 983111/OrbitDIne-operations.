@@ -31,10 +31,9 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
       .eq('id', userId)
       .maybeSingle();
     if (error) {
-      console.error('[Auth] fetchProfile error:', error.message, 'code:', error.code);
+      console.error('[Auth] fetchProfile error:', error.message);
       return null;
     }
-    console.log('[Auth] fetchProfile result:', data);
     return data ?? null;
   } catch (err) {
     console.error('[Auth] fetchProfile unexpected error:', err);
@@ -44,13 +43,11 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
 
 async function fetchOrCreateRestaurant(profileId: string): Promise<string | null> {
   try {
-    const { data: existing, error: fetchErr } = await supabase
+    const { data: existing } = await supabase
       .from('restaurants')
       .select('id')
       .limit(1)
       .maybeSingle();
-
-    if (fetchErr) console.error('[Auth] fetchRestaurant error:', fetchErr.message);
 
     if (existing?.id) {
       await supabase.from('profiles').update({ restaurant_id: existing.id }).eq('id', profileId);
@@ -76,6 +73,29 @@ async function fetchOrCreateRestaurant(profileId: string): Promise<string | null
   }
 }
 
+/**
+ * Loads (and optionally retries) a profile, then resolves restaurant for owners.
+ * Returns the fully-resolved profile or null.
+ */
+async function resolveProfile(userId: string, retryOnMiss: boolean): Promise<Profile | null> {
+  let p = await fetchProfile(userId);
+
+  if (!p && retryOnMiss) {
+    console.log('[Auth] Profile not found, retrying in 1.5s...');
+    await new Promise((r) => setTimeout(r, 1500));
+    p = await fetchProfile(userId);
+  }
+
+  if (!p) return null;
+
+  if (p.role === 'owner' && !p.restaurant_id) {
+    const rid = await fetchOrCreateRestaurant(p.id);
+    if (rid) p = { ...p, restaurant_id: rid };
+  }
+
+  return p;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -83,62 +103,85 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Track the userId we are currently loading so we never double-load the same user
-  const loadingForUserId = useRef<string | null>(null);
+  // Tracks which userId we are currently fetching a profile for,
+  // so we never fire two simultaneous fetches for the same user.
+  const fetchingFor = useRef<string | null>(null);
 
-  const loadAndSetProfile = async (userId: string, retryOnMiss = false) => {
-    // If already loading for this exact user, skip
-    if (loadingForUserId.current === userId) {
-      console.log('[Auth] loadAndSetProfile: already loading for', userId, '— skipping');
-      return;
-    }
+  useEffect(() => {
+    // `mounted` prevents state updates after the component unmounts
+    // (important for React 18 Strict Mode double-invoke).
+    let mounted = true;
 
-    loadingForUserId.current = userId;
-    console.log('[Auth] loadAndSetProfile start for', userId);
+    /**
+     * Central routine: given a user object, load their profile and update state.
+     * `retryOnMiss` is true right after a fresh sign-up (trigger may lag).
+     */
+    const handleUser = async (incomingUser: User | null, retryOnMiss = false) => {
+      if (!mounted) return;
 
-    try {
-      let p = await fetchProfile(userId);
-
-      // New signup: DB trigger may not have created the profile row yet — retry once
-      if (!p && retryOnMiss) {
-        console.log('[Auth] Profile not found, retrying in 1.5s...');
-        await new Promise((r) => setTimeout(r, 1500));
-        p = await fetchProfile(userId);
-      }
-
-      if (!p) {
-        console.error('[Auth] Profile still not found after retry');
-        setAuthError('Profile not found. Please refresh or contact support.');
+      if (!incomingUser) {
+        // No session — clear everything and stop loading.
+        setUser(null);
+        setSession(null);
+        setProfile(null);
+        setAuthError(null);
         setLoading(false);
+        fetchingFor.current = null;
         return;
       }
 
-      // Owner without restaurant: create/link one
-      if (p.role === 'owner' && !p.restaurant_id) {
-        console.log('[Auth] Owner has no restaurant — creating one...');
-        const rid = await fetchOrCreateRestaurant(p.id);
-        if (rid) p = { ...p, restaurant_id: rid };
+      // Avoid duplicate fetches for the same user.
+      if (fetchingFor.current === incomingUser.id) {
+        console.log('[Auth] Already fetching profile for', incomingUser.id, '— skipping');
+        return;
       }
 
-      console.log('[Auth] Profile loaded successfully:', p.role, p.email);
-      setProfile(p);
-      setAuthError(null);
-    } catch (err) {
-      console.error('[Auth] loadAndSetProfile threw:', err);
-      setAuthError('Failed to load profile. Please refresh.');
-    } finally {
-      loadingForUserId.current = null;
-      setLoading(false);
-    }
-  };
+      fetchingFor.current = incomingUser.id;
+      setLoading(true);
 
-  useEffect(() => {
-    // onAuthStateChange fires INITIAL_SESSION almost immediately on mount.
-    // We use that as our single source of truth — no separate getSession() call.
-    // This avoids the race condition between getSession() and onAuthStateChange.
+      try {
+        const p = await resolveProfile(incomingUser.id, retryOnMiss);
 
+        if (!mounted) return; // Unmounted while fetching — discard result.
+
+        if (!p) {
+          setAuthError('Profile not found. Please refresh or contact support.');
+        } else {
+          setUser(incomingUser);
+          setProfile(p);
+          setAuthError(null);
+        }
+      } catch (err) {
+        console.error('[Auth] handleUser error:', err);
+        if (mounted) setAuthError('Failed to load profile. Please refresh.');
+      } finally {
+        if (mounted) {
+          fetchingFor.current = null;
+          setLoading(false);
+        }
+      }
+    };
+
+    // ── 1. Load the initial session synchronously from storage ──────────
+    // Using getSession() instead of relying solely on onAuthStateChange
+    // prevents the "stuck loading" race when INITIAL_SESSION + SIGNED_IN
+    // both fire on page reload.
+    supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
+      if (!mounted) return;
+
+      if (existingSession?.user) {
+        setSession(existingSession);
+        handleUser(existingSession.user, false);
+      } else {
+        // No stored session → done loading immediately.
+        setLoading(false);
+      }
+    });
+
+    // ── 2. Listen for subsequent auth changes (sign-in, sign-out, refresh) ─
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
+        if (!mounted) return;
         console.log('[Auth] event:', event, '|', newSession?.user?.email ?? 'no user');
 
         if (event === 'SIGNED_OUT') {
@@ -146,52 +189,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(null);
           setProfile(null);
           setAuthError(null);
-          loadingForUserId.current = null;
+          fetchingFor.current = null;
           setLoading(false);
           return;
         }
 
-        if (event === 'TOKEN_REFRESHED') {
-          // Token silently refreshed — just update session, keep profile
+        if (event === 'TOKEN_REFRESHED' && newSession) {
+          // Silently keep the session up to date — no profile reload needed.
           setSession(newSession);
           return;
         }
 
-        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-          if (!newSession?.user) {
-            // No session (e.g. INITIAL_SESSION with no logged-in user)
-            setLoading(false);
-            return;
-          }
-
+        if (event === 'SIGNED_IN' && newSession?.user) {
           setSession(newSession);
-          setUser(newSession.user);
 
-          // If we already have a profile for this user, don't reload
-          if (profile && profile.id === newSession.user.id) {
-            console.log('[Auth] Profile already loaded for this user, skipping fetch');
-            setLoading(false);
-            return;
+          // If we already finished loading this exact user (e.g. getSession() handled
+          // it first), there's nothing more to do.
+          if (fetchingFor.current === null) {
+            // Check current profile via functional update to avoid stale closure.
+            setProfile((currentProfile) => {
+              if (currentProfile && currentProfile.id === newSession.user.id) {
+                // Profile already loaded — nothing to do.
+                return currentProfile;
+              }
+              // Profile not yet loaded — kick off fetch asynchronously.
+              handleUser(newSession.user, true);
+              return currentProfile; // keep current value for now
+            });
           }
-
-          setLoading(true);
-          await loadAndSetProfile(newSession.user.id, event === 'SIGNED_IN');
         }
+
+        // INITIAL_SESSION is handled by getSession() above — ignore here
+        // to avoid the double-fetch race condition.
       }
     );
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []); // Empty deps — runs exactly once per mount.
 
   const login = async (email: string, password: string): Promise<{ error: string | null }> => {
     setAuthError(null);
-    setLoading(true); // Show spinner immediately
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      setLoading(false);
-      return { error: error.message };
-    }
-    // onAuthStateChange SIGNED_IN will call loadAndSetProfile → setLoading(false)
+    if (error) return { error: error.message };
+    // onAuthStateChange SIGNED_IN → handleUser → setLoading(false)
     return { error: null };
   };
 
@@ -216,7 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setSession(null);
     setAuthError(null);
-    loadingForUserId.current = null;
+    fetchingFor.current = null;
     setLoading(false);
     await supabase.auth.signOut();
   };
