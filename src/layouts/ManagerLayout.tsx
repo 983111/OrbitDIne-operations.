@@ -1,38 +1,53 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
-import { LayoutDashboard, LogOut, Bell, UtensilsCrossed } from 'lucide-react';
+import { LayoutDashboard, LogOut, Bell, ChefHat, Wifi, WifiOff } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useState, useEffect } from 'react';
 
 export function ManagerLayout() {
   const { logout, profile } = useAuth();
   const location = useLocation();
+  const [online, setOnline] = useState(navigator.onLine);
 
-  const navItems = [
-    { name: 'Floor Map', path: '/manager', icon: LayoutDashboard },
-  ];
+  useEffect(() => {
+    const on  = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+
+  const initials = (profile?.full_name ?? profile?.email ?? 'M')
+    .split(' ').map(s => s[0]).join('').toUpperCase().slice(0, 2);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="bg-slate-900 text-white h-16 flex items-center justify-between px-6 shadow-md z-10">
-        <div className="flex items-center space-x-8">
-          <div className="flex items-center">
-            <UtensilsCrossed className="h-6 w-6 text-indigo-400 mr-2" />
-            <h1 className="text-xl font-bold tracking-tight">Manager Portal</h1>
+    <div className="min-h-screen flex flex-col bg-[#07070F]">
+
+      {/* ── Top navbar ── */}
+      <header className="h-14 px-6 flex items-center justify-between bg-[#0A0A14] border-b border-white/[0.05] shrink-0 z-20">
+        <div className="flex items-center gap-6">
+          {/* Logo */}
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-orange-500/20 border border-orange-500/25 flex items-center justify-center">
+              <ChefHat className="w-4 h-4 text-orange-400" />
+            </div>
+            <span className="text-sm font-bold text-[#F0F0FF]">OrbitDine</span>
           </div>
-          <nav className="hidden md:flex space-x-1">
-            {navItems.map((item) => {
+
+          {/* Nav */}
+          <nav className="flex gap-1">
+            {[{ name: 'Floor Map', path: '/manager', icon: LayoutDashboard }].map(item => {
               const Icon = item.icon;
-              const isActive = location.pathname === item.path;
+              const active = location.pathname === item.path;
               return (
-                <Link
-                  key={item.name}
-                  to={item.path}
+                <Link key={item.name} to={item.path}
                   className={cn(
-                    "flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors",
-                    isActive ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                  )}
-                >
-                  <Icon className="mr-2 h-4 w-4" />
+                    'flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all',
+                    active
+                      ? 'bg-orange-500/15 text-orange-400 border border-orange-500/20'
+                      : 'text-[#6B6B9A] hover:bg-white/[0.05] hover:text-[#C0C0E0]',
+                  )}>
+                  <Icon className="w-3.5 h-3.5" />
                   {item.name}
                 </Link>
               );
@@ -40,23 +55,44 @@ export function ManagerLayout() {
           </nav>
         </div>
 
-        <div className="flex items-center space-x-6">
-          <button className="p-2 text-slate-300 hover:text-white relative">
-            <Bell className="h-5 w-5" />
-            <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full"></span>
-          </button>
-          <div className="h-8 w-px bg-slate-700"></div>
-          <div className="text-sm">
-            <p className="font-medium">{profile?.full_name ?? 'Manager'}</p>
-            <p className="text-slate-400 text-xs">{profile?.email ?? ''}</p>
+        <div className="flex items-center gap-3">
+          {/* Connection indicator */}
+          <div className={cn(
+            'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border',
+            online
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+              : 'bg-amber-500/10 border-amber-500/20 text-amber-400',
+          )}>
+            {online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+            {online ? 'Live' : 'Offline'}
           </div>
-          <button onClick={logout} className="p-2 text-slate-300 hover:text-white transition-colors" title="Sign Out">
-            <LogOut className="h-5 w-5" />
+
+          <button className="relative p-2 text-[#6B6B9A] hover:text-[#F0F0FF] transition-colors">
+            <Bell className="w-4 h-4" />
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-orange-500 rounded-full" />
+          </button>
+
+          <div className="h-6 w-px bg-white/[0.08]" />
+
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-orange-500/30 to-indigo-500/30 border border-white/10 flex items-center justify-center text-[10px] font-bold text-[#F0F0FF]">
+              {initials}
+            </div>
+            <div className="hidden sm:block">
+              <p className="text-xs font-semibold text-[#E0E0F0] leading-none">{profile?.full_name ?? 'Manager'}</p>
+              <p className="text-[10px] text-[#4A4A6A] mt-0.5">Manager</p>
+            </div>
+          </div>
+
+          <button onClick={logout}
+            className="p-2 text-[#6B6B9A] hover:text-[#F87171] transition-colors" title="Sign out">
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden flex flex-col relative">
+      {/* ── Content ── */}
+      <main className="flex-1 flex flex-col overflow-hidden">
         <Outlet />
       </main>
     </div>
